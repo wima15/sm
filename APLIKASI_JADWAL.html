@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Penyusun Jadwal Pelajaran</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1d2330;--mu:#667085;--bd:#dde1e8;--ac:#2f6fed;--ac2:#e8effd;--er:#c0392b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12151b;--card:#1b2029;--tx:#e8ebf0;--mu:#98a1b3;--bd:#2c3340;--ac:#6b9bff;--ac2:#22304f;--er:#ff7b6b}}
+:root[data-theme="dark"]{--bg:#12151b;--card:#1b2029;--tx:#e8ebf0;--mu:#98a1b3;--bd:#2c3340;--ac:#6b9bff;--ac2:#22304f;--er:#ff7b6b}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{padding:14px 16px 6px}h1{font-size:18px;margin:0}header p{margin:2px 0 0;color:var(--mu);font-size:12px}
+nav{display:flex;gap:4px;padding:8px 12px;overflow-x:auto;position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);z-index:5}
+nav button{white-space:nowrap;border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:8px 12px;border-radius:20px;cursor:pointer}
+nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+main{padding:8px 12px 40px;max-width:980px;margin:auto}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:12px}
+h2{font-size:15px;margin:0 0 8px}
+input,select,button{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:7px 9px}
+input{min-width:0}button{cursor:pointer}
+.pri{background:var(--ac);color:#fff;border-color:var(--ac);font-weight:600}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.row>input{flex:1 1 90px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:var(--ac2);border-radius:14px;padding:3px 6px 3px 10px;display:flex;gap:6px;align-items:center;font-size:13px}
+.chip b{cursor:pointer;color:var(--mu);padding:0 4px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.sc label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0}.sc input,.sc select{width:92px}
+.tw{overflow-x:auto}table{border-collapse:collapse;width:100%}
+th,td{border:1px solid var(--bd);padding:6px 7px;text-align:center;font-size:12.5px}th{background:var(--ac2)}
+td.l{text-align:left}td.brk{background:var(--bg);color:var(--mu);font-style:italic}
+.cell{border-radius:6px;padding:3px;line-height:1.25}
+.err{color:var(--er)}.mu{color:var(--mu)}.dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:6px}.dgrid label{display:flex;flex-direction:column;font-size:12px;color:var(--mu);gap:2px}.dgrid select{width:100%}.hide{display:none}
+@media print{nav,header,.noprint{display:none!important}body{background:#fff;color:#000}}
+</style></head><body>
+<header><h1>📅 Penyusun Jadwal Pelajaran</h1><p>Kode guru · kode mapel · kelas · JP per minggu · shift 1 / 2</p><p id="sbst" class="mu noprint" style="margin-top:4px"></p></header>
+<nav id="nav"></nav><main id="app"></main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+const DAYS=["Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"];
+const mk=st=>DAYS.map(()=>({start:st,dur:40,jp:8,b1a:4,b1d:15,b2a:"",b2d:15}));
+const DEF={teachers:[],subjects:[],classes:[],asg:[],days:5,
+cfg:{1:mk("07:00"),2:mk("12:30")},minGap:true,res:null};
+let S=JSON.parse(JSON.stringify(DEF)),tab="data",selC="",selT="",moveFrom=null,editCell=null,CONF={set:new Set(),list:[]},viewAll=false;
+let shDay={1:0,2:0};
+function rowsFromAsg(){const seen={},r=[];S.asg.forEach(a=>{const k=a.s+"|"+a.t;if(!seen[k]){seen[k]=1;r.push({s:a.s,t:a.t})}});return r}
+try{const x=localStorage.getItem("jadwal_v1");if(x){const L=JSON.parse(x);
+ if(!L.cfg&&L.shifts){L.cfg={};[1,2].forEach(k=>{const o=L.shifts[k];L.cfg[k]=DAYS.map(()=>({start:o.start,dur:o.dur,jp:o.jp,b1a:o.brAfter,b1d:o.brDur,b2a:"",b2d:15}))})}
+ delete L.shifts;S=Object.assign(S,L)}}catch(e){}
+S.classes.forEach(c=>{if(!c.sh)c.sh=Array(6).fill(c.shift==2?2:1)});
+S.teachers.forEach(t=>{if(!t.avoid)t.avoid=[]});
+if(S.minGap===undefined)S.minGap=true;
+if(!S.rows)S.rows=rowsFromAsg();
+/* ===== SUPABASE ===== */
+const SB_URL="https://jvunlziapbmvxmrrnphd.supabase.co",SB_KEY="sb_publishable_g0I7fYBQnCwIrbzub-3FYA_cZXlH6Im",SB_ID="main";
+const SB_H={apikey:SB_KEY,Authorization:"Bearer "+SB_KEY,"Content-Type":"application/json"};
+let sbTimer=null,sbBusy=false,sbDirty=false;
+function sbStatus(t,err){const e=document.getElementById("sbst");if(e){e.textContent=t;e.style.color=err?"var(--er)":"var(--mu)"}}
+const getTs=()=>+(localStorage.getItem("jadwal_ts")||0);
+async function sbPush(){if(sbBusy){sbDirty=true;return}sbBusy=true;sbDirty=false;sbStatus("☁️ Menyimpan…");
+ try{const ts=getTs()||Date.now();
+  const r=await fetch(SB_URL+"/rest/v1/jadwal_state?on_conflict=id",{method:"POST",headers:{...SB_H,Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify({id:SB_ID,data:S,client_ts:ts,updated_at:new Date().toISOString()})});
+  if(!r.ok)throw new Error(r.status+" "+(await r.text()).slice(0,120));
+  sbStatus("☁️ Tersimpan di Supabase")}
+ catch(e){sbStatus("⚠ Gagal sinkron: "+e.message,1)}
+ sbBusy=false;if(sbDirty)sbPush()}
+function sbSchedule(){clearTimeout(sbTimer);sbStatus("☁️ Menunggu sinkron…");sbTimer=setTimeout(sbPush,1200)}
+function normalize(){S.classes.forEach(c=>{if(!c.sh)c.sh=Array(6).fill(c.shift==2?2:1)});S.teachers.forEach(t=>{if(!t.avoid)t.avoid=[]});if(S.minGap===undefined)S.minGap=true;if(!S.rows)S.rows=rowsFromAsg()}
+async function sbPull(){sbStatus("☁️ Memuat dari Supabase…");
+ try{const r=await fetch(SB_URL+"/rest/v1/jadwal_state?id=eq."+SB_ID+"&select=data,client_ts",{headers:SB_H});
+  if(!r.ok)throw new Error(r.status+" "+(await r.text()).slice(0,120));
+  const rows=await r.json();
+  if(!rows.length){sbStatus("☁️ Belum ada data di server, mengunggah…");await sbPush();return}
+  const rem=rows[0];
+  if((rem.client_ts||0)>getTs()){S=Object.assign(JSON.parse(JSON.stringify(DEF)),rem.data);normalize();
+   try{localStorage.setItem("jadwal_v1",JSON.stringify(S));localStorage.setItem("jadwal_ts",String(rem.client_ts||0))}catch(e){}
+   selC="";selT="";render();sbStatus("☁️ Data dimuat dari Supabase")}
+  else if(getTs()>(rem.client_ts||0)){await sbPush()}
+  else sbStatus("☁️ Sinkron")}
+ catch(e){sbStatus("⚠ Offline / gagal konek: "+e.message,1)}}
+const save=()=>{try{localStorage.setItem("jadwal_v1",JSON.stringify(S));localStorage.setItem("jadwal_ts",String(Date.now()))}catch(e){}sbSchedule()};
+const $=s=>document.querySelector(s);
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const tm=m=>String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");
+const pm=t=>{const[a,b]=t.split(":");return +a*60+ +b};
+function gapPenalty(cs,ce,busy){if(!busy.length)return 0;let g=Infinity;busy.forEach(([s,e])=>{if(cs>=e)g=Math.min(g,cs-e);else if(ce<=s)g=Math.min(g,s-ce);else g=Math.min(g,0)});return g}
+function gapScore(cg){let tot=0;const byTD={};
+ S.classes.forEach(c=>{for(let d=0;d<S.days;d++){const sl=slots(c.sh[d],d);(cg[c.n][d]||[]).forEach((x,i)=>{if(!x)return;const s=sl[i];if(!s)return;const k=x.t+"|"+d;(byTD[k]=byTD[k]||[]).push([s.s,s.e])})}});
+ Object.values(byTD).forEach(arr=>{if(arr.length<2)return;arr.sort((a,b)=>a[0]-b[0]);const span=arr[arr.length-1][1]-arr[0][0];const dur=arr.reduce((a,x)=>a+(x[1]-x[0]),0);tot+=Math.max(0,span-dur)});
+ return tot}
+function computeConflicts(){const set=new Set(),list=[];if(!S.res)return{set,list};const busy={};
+ S.classes.forEach(c=>{for(let d=0;d<S.days;d++){const sl=slots(c.sh[d],d);(S.res.cg[c.n][d]||[]).forEach((x,i)=>{if(!x)return;const slot=sl[i];if(!slot)return;
+  const bk=x.t+"|"+d,arr=busy[bk]=busy[bk]||[];
+  for(const e of arr){if(slot.s<e.e&&e.s<slot.e){set.add(c.n+"|"+d+"|"+i);set.add(e.c+"|"+d+"|"+e.i);list.push({t:x.t,d,c1:e.c,c2:c.n})}}
+  arr.push({s:slot.s,e:slot.e,c:c.n,i})})}});
+ return{set,list}}
+const hue=k=>{let h=0;for(const c of k)h=(h*31+c.charCodeAt(0))%360;return h};
+const col=k=>`background:hsl(${hue(k)} 70% 60% / .28)`;
+function slots(sh,d){const c=S.cfg[sh][d],r=[];let t=pm(c.start);
+ for(let i=0;i<c.jp;i++){r.push({i,s:t,e:t+c.dur});t+=c.dur;let br=0;
+  if(+c.b1a&&i+1==+c.b1a&&i+1<c.jp)br+=+c.b1d||0;
+  if(+c.b2a&&i+1==+c.b2a&&i+1<c.jp)br+=+c.b2d||0;
+  if(br){r[i].br=br;t+=br}}return r}
+function sample(){S.teachers=[["G01","Budi"],["G02","Siti"],["G03","Andi"],["G04","Rina"]].map(([k,n])=>({k,n}));
+ S.subjects=[["MTK","Matematika"],["BIN","B. Indonesia"],["ING","B. Inggris"],["IPA","IPA"]].map(([k,n])=>({k,n}));
+ S.classes=[{n:"X-1",sh:[1,1,1,1,1,1]},{n:"X-2",sh:[1,1,1,2,2,2]},{n:"X-3",sh:[2,2,2,2,2,2]}];S.asg=[];
+ const m=[["MTK","G01",4],["BIN","G02",4],["ING","G03",3],["IPA","G04",4]];
+ S.classes.forEach(c=>m.forEach(([s,t,jp])=>S.asg.push({c:c.n,s,t,jp})));S.rows=rowsFromAsg();S.res=null;save();render()}
+function gen(){
+ const nd=S.days,as=S.asg.filter(a=>S.classes.find(c=>c.n==a.c)&&a.jp>0);
+ if(!as.length){alert("Tambahkan penugasan (kelas–mapel–guru–JP) dulu.");return}
+ const avoidOf={};S.teachers.forEach(t=>avoidOf[t.k]=new Set(t.avoid||[]));
+ const rounds=S.minGap?70:250;
+ let best=null;
+ for(let n=0;n<rounds&&(!best||best.un.length||best.vio);n++){
+  const cg={},tb={},un=[],cnt={};let vio=0;const sl={1:[...Array(nd).keys()].map(d=>slots(1,d)),2:[...Array(nd).keys()].map(d=>slots(2,d))};
+  S.classes.forEach(c=>cg[c.n]=Array.from({length:nd},(_,d)=>Array(S.cfg[c.sh[d]][d].jp).fill(null)));
+  let bl=[];as.forEach((a,ix)=>{let j=+a.jp;while(j>0){const k=j>=2?2:1;bl.push({a,ix,n:k,r:Math.random()});j-=k}});
+  bl.sort((x,y)=>y.n-x.n||y.r-x.r);
+  for(const b of bl){let ok=false;const cl=S.classes.find(c=>c.n==b.a.c),avoid=avoidOf[b.a.t]||new Set();
+   for(const strict of[true,false]){
+    const ds=[...Array(nd).keys()].sort((p,q)=>(( avoid.has(p)?1:0)-(avoid.has(q)?1:0))||((cnt[b.ix+"_"+p]||0)-(cnt[b.ix+"_"+q]||0))||Math.random()-.5);
+    for(const d of ds){if(strict&&(cnt[b.ix+"_"+d]||0)+b.n>2)continue;const S1=sl[cl.sh[d]][d];
+     const tBusy=(tb[b.a.t]||{})[d]||[];
+     let st=[...Array(Math.max(0,S1.length-b.n+1)).keys()];
+     st=S.minGap&&tBusy.length?st.map(i=>({i,p:gapPenalty(S1[i].s,S1[i+b.n-1].e,tBusy)})).sort((a,c2)=>a.p-c2.p||Math.random()-.5).map(x=>x.i):st.sort(()=>Math.random()-.5);
+     for(const i of st){let f=true;
+      for(let k=0;k<b.n;k++){const s=S1[i+k];
+       if(cg[cl.n][d][i+k]){f=false;break}
+       if(k&&S1[i+k-1].br&&b.n>1&&strict){f=false;break}
+       const busy=(tb[b.a.t]||{})[d]||[];if(busy.some(([x,y])=>s.s<y&&x<s.e)){f=false;break}}
+      if(f){for(let k=0;k<b.n;k++){cg[cl.n][d][i+k]={s:b.a.s,t:b.a.t};((tb[b.a.t]=tb[b.a.t]||{})[d]=(tb[b.a.t][d]||[])).push([S1[i+k].s,S1[i+k].e])}
+       cnt[b.ix+"_"+d]=(cnt[b.ix+"_"+d]||0)+b.n;if(avoid.has(d))vio+=b.n;ok=true;break}}
+     if(ok)break}
+    if(ok)break}
+   if(!ok)un.push(`${b.a.c} • ${b.a.s} (${b.a.t}) — ${b.n} JP`)}
+  const gap=S.minGap?gapScore(cg):0;
+  if(!best||un.length<best.un.length||(un.length==best.un.length&&vio<best.vio)||(un.length==best.un.length&&vio==best.vio&&gap<best.gap))best={cg,un,vio,gap}}
+ S.res=best;moveFrom=null;editCell=null;save();tab="jadwal";selC=selC||S.classes[0].n;render()}
+function tView(){const t=selT||(S.teachers[0]||{}).k;if(!t||!S.res)return"";const rows=[];
+ S.classes.forEach(c=>{S.res.cg[c.n].forEach((day,d)=>{const sl=slots(c.sh[d],d);day.forEach((x,i)=>{if(x&&x.t==t)rows.push({d,s:sl[i].s,e:sl[i].e,i,c:c.n,m:x.s})})})});
+ rows.sort((a,b)=>a.d-b.d||a.s-b.s);
+ return`<div class="tw"><table><tr><th>Hari</th><th>Waktu</th><th>Kode</th><th>Kelas</th><th>Mapel</th></tr>${rows.map(r=>{const conf=CONF.set.has(r.c+"|"+r.d+"|"+r.i);return`<tr style="${conf?"outline:2px solid var(--er)":""}" title="${conf?"⚠ Bentrok guru":""}"><td>${DAYS[r.d]}</td><td>${tm(r.s)}–${tm(r.e)}</td><td><span class="cell" style="${col(r.m)}">${esc(t+r.m)}</span></td><td>${esc(r.c)}</td><td>${esc((S.subjects.find(v=>v.k==r.m)||{}).n||r.m)}</td></tr>`}).join("")||'<tr><td colspan=5 class=mu>Tidak ada jam mengajar</td></tr>'}</table></div><p class="mu">Total: ${rows.length} JP/minggu</p>`}
+function cellClick(d,i){if(editCell)editCell=null;
+ if(moveFrom){if(moveFrom.d==d&&moveFrom.i==i){moveFrom=null}else{swapCell(moveFrom.d,moveFrom.i,d,i);moveFrom=null}render();return}
+ const x=S.res.cg[selC][d][i];
+ if(x){moveFrom={d,i}}else{editCell={d,i}}
+ render()}
+function swapCell(d1,i1,d2,i2){const g=S.res.cg[selC],t=g[d1][i1];g[d1][i1]=g[d2][i2];g[d2][i2]=t;save()}
+function clearCellAt(d,i){S.res.cg[selC][d][i]=null;save()}
+function placeCell(d,i,v){if(v){const[s,t]=v.split("|");S.res.cg[selC][d][i]={s,t}}else{S.res.cg[selC][d][i]=null}editCell=null;save();render()}
+function cView(){const c=S.classes.find(x=>x.n==selC)||S.classes[0];if(!c||!S.res)return"";const g=S.res.cg[c.n],sls=g.map((_,d)=>slots(c.sh[d],d)),mx=Math.max(...sls.map(s=>s.length));
+ let hint=moveFrom?`<div class="row" style="background:var(--ac2);border-radius:8px;padding:6px 8px;align-items:center"><span>📍 Pindahkan ${DAYS[moveFrom.d]} JP${moveFrom.i+1} — ketuk sel tujuan (isi atau kosong) untuk menukar.</span><button onclick="clearCellAt(moveFrom.d,moveFrom.i);moveFrom=null;render()">Kosongkan</button><button onclick="moveFrom=null;render()">Batal</button></div>`:'<p class="mu noprint">Ketuk sel berisi untuk memindahkannya, ketuk sel kosong untuk mengisinya manual.</p>';
+ let h=hint+`<div class="tw"><table><tr><th>JP</th>${DAYS.slice(0,S.days).map((d,i)=>`<th>${d}<br><span class="mu">Shift ${c.sh[i]}</span></th>`).join("")}</tr>`;
+ for(let i=0;i<mx;i++){h+=`<tr><td><b>${i+1}</b></td>`+g.map((d,k)=>{const s=sls[k][i];if(!s)return"<td class=mu>·</td>";const x=d[i];
+  const key=c.n+"|"+k+"|"+i,conf=CONF.set.has(key),sel=moveFrom&&moveFrom.d==k&&moveFrom.i==i,ed=editCell&&editCell.d==k&&editCell.i==i;
+  const sub=x?(S.subjects.find(v=>v.k==x.s)||{}).n||"":"";
+  let inner=ed?`<select onclick="event.stopPropagation()" onchange="placeCell(${k},${i},this.value)"><option value="">(Kosong)</option>${S.rows.map(r=>`<option value="${r.s}|${r.t}">${esc(r.t+r.s)} · ${esc((S.subjects.find(v=>v.k==r.s)||{}).n||r.s)}</option>`).join("")}</select>`
+   :`<div class="cell" style="${x?col(x.s):""}"><span class="mu" style="font-size:10px">${tm(s.s)}–${tm(s.e)}</span><br>${x?`<b>${esc(x.t+x.s)}</b><br><span class="mu" style="font-size:10px">${esc(sub)}</span>`:'<span class="mu">–</span>'}</div>`;
+  const st=(conf?"outline:2px solid var(--er);":"")+(sel?"outline:2px solid var(--ac);":"");
+  return`<td style="${st}cursor:pointer" onclick="cellClick(${k},${i})" title="${conf?"⚠ Bentrok guru":""}">${inner}</td>`}).join("")+"</tr>";
+  if(g.some((d,k)=>sls[k][i]&&sls[k][i].br))h+=`<tr>` + `<td class="brk l">☕ Istirahat</td>` + g.map((d,k)=>{const s=sls[k][i];return s&&s.br?`<td class="brk">${tm(s.e)}–${tm(s.e+s.br)}</td>`:'<td class="brk">–</td>'}).join("") + `</tr>`}
+ return h+"</table></div>"}
+function allTable(){let out="";
+ for(let d=0;d<S.days;d++){const sls=S.classes.map(c=>slots(c.sh[d],d)),mx=Math.max(0,...sls.map(x=>x.length));
+  out+=`<div class="card"><h2 style="margin:0 0 8px">${DAYS[d]}</h2><div class="tw"><table><tr><th>JP</th>${S.classes.map(c=>`<th>${esc(c.n)}<br><span class="mu">Shift ${c.sh[d]}</span></th>`).join("")}</tr>`;
+  for(let i=0;i<mx;i++){out+=`<tr><td><b>${i+1}</b></td>`+S.classes.map((c,ci)=>{const s=sls[ci][i];if(!s)return'<td class="mu">·</td>';
+    const x=S.res.cg[c.n][d][i],key=c.n+"|"+d+"|"+i,conf=CONF.set.has(key),sub=x?(S.subjects.find(v=>v.k==x.s)||{}).n||"":"";
+    return`<td style="${conf?"outline:2px solid var(--er);":""}" title="${conf?"⚠ Bentrok guru":""}"><div class="cell" style="${x?col(x.s):""}"><span class="mu" style="font-size:9px">${tm(s.s)}–${tm(s.e)}</span><br>${x?`<b>${esc(x.t+x.s)}</b><br><span class="mu" style="font-size:9px">${esc(sub)}</span>`:'<span class="mu">–</span>'}</div></td>`}).join("")+"</tr>";
+   if(sls.some(x=>x[i]&&x[i].br))out+=`<tr><td class="brk l">☕ Istirahat</td>`+sls.map(x=>{const s=x[i];return s&&s.br?`<td class="brk">${tm(s.e)}–${tm(s.e+s.br)}</td>`:'<td class="brk">–</td>'}).join("")+`</tr>`}
+  out+="</table></div></div>"}
+ return out}
+function csv(){let o="Kelas,Shift,Hari,JP,Mulai,Selesai,Mapel,Guru\n";
+ S.classes.forEach(c=>{S.res.cg[c.n].forEach((day,d)=>{const sl=slots(c.sh[d],d);day.forEach((x,i)=>{if(x)o+=[c.n,c.sh[d],DAYS[d],i+1,tm(sl[i].s),tm(sl[i].e),x.s,x.t].join(",")+"\n"})})});
+ saveFile("jadwal.csv","\ufeff"+o)}
+
+async function saveFile(name,data){
+ try{const d=window.claude&&await claude.use("downloads");
+  if(d){await d.save({filename:name,data});return}}catch(e){if(e&&e.code&&e.code!="declined"){alert("Gagal menyimpan: "+(e.message||e.code));return}else if(e&&e.code=="declined")return}
+ try{const blob=(data instanceof Blob)?data:new Blob([data],{type:name.toLowerCase().endsWith(".csv")?"text/csv;charset=utf-8":"application/octet-stream"});
+  const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),2000)}catch(e){alert("Gagal mengunduh file: "+(e.message||e))}}
+function wbBlob(wb){const a=XLSX.write(wb,{bookType:"xlsx",type:"array"});return new Blob([a],{type:"application/octet-stream"})}
+function mkWb(g,m,k,p){const wb=XLSX.utils.book_new();
+ const add=(n,rows,w)=>{const ws=XLSX.utils.aoa_to_sheet(rows);ws["!cols"]=w.map(x=>({wch:x}));XLSX.utils.book_append_sheet(wb,ws,n)};
+ add("Guru",[["Kode","Nama","Hari Dihindari (cth: Sabtu, Jumat)"],...g],[10,26,30]);add("Mapel",[["Kode","Nama"],...m],[10,26]);
+ add("Kelas",[["Kelas",...DAYS],...k],[12,9,9,9,9,9,9]);add("Penugasan",[["Kelas","Mapel","Guru","JP per minggu"],...p],[12,10,10,14]);return wb}
+function dlTemplate(){if(typeof XLSX=="undefined")return alert("Library Excel belum termuat, periksa koneksi.");
+ saveFile("template-jadwal.xlsx",wbBlob(mkWb([["G01","Budi",""],["G02","Siti","Sabtu"]],[["MTK","Matematika"],["BIN","B. Indonesia"]],[["X-1",1,1,1,1,1,1],["X-2",1,1,1,2,2,2]],[["X-1","MTK","G01",4],["X-1","BIN","G02",4],["X-2","MTK","G01",4],["X-2","BIN","G02",4]])))}
+function dlData(){if(typeof XLSX=="undefined")return alert("Library Excel belum termuat.");
+ saveFile("data-jadwal.xlsx",wbBlob(mkWb(S.teachers.map(x=>[x.k,x.n,(x.avoid||[]).map(d=>DAYS[d]).join(", ")]),S.subjects.map(x=>[x.k,x.n]),S.classes.map(x=>[x.n,...x.sh]),S.asg.map(x=>[x.c,x.s,x.t,x.jp]))))}
+function dlJadwal(){if(typeof XLSX=="undefined"||!S.res)return;const wb=XLSX.utils.book_new();
+ S.classes.forEach(c=>{const g=S.res.cg[c.n],sls=g.map((_,d)=>slots(c.sh[d],d)),mx=Math.max(...sls.map(s=>s.length));const rows=[["JP",...DAYS.slice(0,S.days).map((d,i)=>d+" (Shift "+c.sh[i]+")")]];
+  for(let i=0;i<mx;i++)rows.push([i+1,...g.map((d,k)=>{const s=sls[k][i];return s?tm(s.s)+"-"+tm(s.e)+(d[i]?"  "+d[i].s+" ("+d[i].t+")":""):""})]);
+  const ws=XLSX.utils.aoa_to_sheet(rows);ws["!cols"]=[{wch:5},...DAYS.slice(0,S.days).map(()=>({wch:26}))];
+  XLSX.utils.book_append_sheet(wb,ws,c.n.replace(/[\\\/?*\[\]:]/g,"-").slice(0,31))});
+ saveFile("jadwal-pelajaran.xlsx",wbBlob(wb))}
+function impXlsx(inp){const f=inp.files[0];if(!f)return;if(typeof XLSX=="undefined"){alert("Library Excel belum termuat.");return}
+ const r=new FileReader();r.onload=e=>{try{
+  const wb=XLSX.read(e.target.result,{type:"array"});
+  const get=n=>{const k=wb.SheetNames.find(x=>x.toLowerCase()==n);return k?XLSX.utils.sheet_to_json(wb.Sheets[k],{header:1,defval:""}).slice(1).filter(r=>String(r[0]).trim()):null};
+  const T=get("guru"),M=get("mapel"),K=get("kelas"),P=get("penugasan");
+  if(!T&&!M&&!K&&!P)return alert("Sheet tidak dikenali. Gunakan templat: Guru, Mapel, Kelas, Penugasan.");
+  const u=v=>String(v).trim().toUpperCase();
+  if(T)S.teachers=T.map(r=>({k:u(r[0]),n:String(r[1]).trim(),avoid:parseAvoidStr(r[2])}));
+  if(M)S.subjects=M.map(r=>({k:u(r[0]),n:String(r[1]).trim()}));
+  if(K)S.classes=K.map(r=>{const one=r[2]===undefined||r[2]==="";return{n:String(r[0]).trim(),sh:DAYS.map((_,i)=>+r[one?1:i+1]==2?2:1)}});
+  if(P)S.asg=P.map(r=>({c:String(r[0]).trim(),s:u(r[1]),t:u(r[2]),jp:Math.max(0,Math.round(+r[3]||0))})).filter(a=>a.jp>0);
+  let add=0;S.asg.forEach(a=>{if(!S.classes.some(c=>c.n==a.c)){S.classes.push({n:a.c,sh:Array(6).fill(1)});add++}
+   if(!S.subjects.some(x=>x.k==a.s)){S.subjects.push({k:a.s,n:""});add++}
+   if(!S.teachers.some(x=>x.k==a.t)){S.teachers.push({k:a.t,n:"",avoid:[]});add++}});
+  S.rows=rowsFromAsg();S.res=null;save();tab="asg";render();
+  alert("Import berhasil: "+S.teachers.length+" guru, "+S.subjects.length+" mapel, "+S.classes.length+" kelas, "+S.asg.length+" penugasan."+(add?"\n"+add+" data yang belum terdaftar ditambahkan otomatis (kelas baru = Shift 1).":""))
+ }catch(err){alert("Gagal membaca file: "+err.message)}inp.value=""};r.readAsArrayBuffer(f)}
+const chips=(arr,f,del)=>`<div class="chips">${arr.map((x,i)=>`<span class="chip">${f(x)}<b onclick="${del}(${i})">×</b></span>`).join("")||'<span class="mu">Belum ada data</span>'}</div>`;
+const opt=(a,f,sel)=>a.map(x=>`<option value="${esc(f(x))}" ${f(x)==sel?"selected":""}>${esc(f(x))}</option>`).join("");
+function add(kind){
+ if(kind=="t"){const k=$("#tk").value.trim().toUpperCase(),n=$("#tn").value.trim();if(!k||S.teachers.some(x=>x.k==k))return;S.teachers.push({k,n,avoid:[]})}
+ if(kind=="s"){const k=$("#sk").value.trim().toUpperCase(),n=$("#sn").value.trim();if(!k||S.subjects.some(x=>x.k==k))return;S.subjects.push({k,n})}
+ if(kind=="c"){const n=$("#cn").value.trim();if(!n||S.classes.some(x=>x.n==n))return;S.classes.push({n,sh:Array(6).fill(+$("#cs").value)})}
+ if(kind=="a"){const c=$("#ac").value,s=$("#as").value,t=$("#at").value,jp=+$("#aj").value;if(!c||!s||!t||!jp)return alert("Lengkapi kelas, mapel, guru & JP.");
+  const e=S.asg.find(x=>x.c==c&&x.s==s);if(e){e.t=t;e.jp=jp}else S.asg.push({c,s,t,jp})}
+ S.res=null;save();render()}
+const del=(k,i)=>{const l=S[k];const r=l.splice(i,1)[0];if(k=="classes")S.asg=S.asg.filter(a=>a.c!=r.n);if(k=="teachers"){S.asg=S.asg.filter(a=>a.t!=r.k);S.rows=S.rows.filter(x=>x.t!=r.k)}if(k=="subjects"){S.asg=S.asg.filter(a=>a.s!=r.k);S.rows=S.rows.filter(x=>x.s!=r.k)}S.res=null;save();render()};
+function toggleAvoid(i,d){const t=S.teachers[i];t.avoid=t.avoid||[];const p=t.avoid.indexOf(d);if(p>=0)t.avoid.splice(p,1);else t.avoid.push(d);S.res=null;save();render()}
+function parseAvoidStr(str){if(!str)return[];return String(str).split(/[,;]+/).map(x=>x.trim()).filter(Boolean).map(x=>DAYS.findIndex(d=>d.toLowerCase().startsWith(x.toLowerCase().slice(0,3)))).filter(x=>x>=0)}
+function setSh(i,d,v){S.classes[i].sh[d]=+v;S.res=null;save();render()}
+function setAll(i,v){if(!v)return;S.classes[i].sh.fill(+v);S.res=null;save();render()}
+function cfgSet(s,d,k,v){S.cfg[s][d][k]=k=="start"?v:(v===""?"":+v);S.res=null;save();render()}
+function copyCfg(s,d){const v=$("#cp"+s).value;if(!v)return alert("Pilih hari sumber dulu.");const[a,b]=v.split("-").map(Number);
+ S.cfg[s][d]=JSON.parse(JSON.stringify(S.cfg[a][b]));S.res=null;save();render()}
+function addRow(){const s=$("#rs").value,t=$("#rt").value;if(!s||!t)return;
+ if(!S.rows.some(r=>r.s==s&&r.t==t))S.rows.push({s,t});save();render()}
+function delRow(s,t){if(!confirm("Hapus baris ini beserta semua JP-nya?"))return;
+ S.rows=S.rows.filter(r=>!(r.s==s&&r.t==t));S.asg=S.asg.filter(a=>!(a.s==s&&a.t==t));S.res=null;save();render()}
+function setCell(s,t,c,v){v=Math.max(0,Math.round(+v||0));const i=S.asg.findIndex(a=>a.s==s&&a.t==t&&a.c==c);
+ if(v>0){if(i>=0)S.asg[i].jp=v;else S.asg.push({c,s,t,jp:v})}else if(i>=0)S.asg.splice(i,1);
+ S.res=null;save()}
+function allDays(s,d){if(!confirm("Salin alokasi hari ini ke semua hari pada Shift "+s+"?"))return;
+ for(let i=0;i<6;i++)if(i!=d)S.cfg[s][i]=JSON.parse(JSON.stringify(S.cfg[s][d]));S.res=null;save();render()}
+function render(){
+ $("#nav").innerHTML=[["data","1. Data"],["shift","2. Shift"],["asg","3. Penugasan"],["jadwal","4. Jadwal"]].map(([k,l])=>`<button class="${tab==k?"on":""}" onclick="tab='${k}';render()">${l}</button>`).join("");
+ let h="";
+ if(tab=="data"){h=`<div class="card"><h2>Guru</h2><div class="row"><input id="tk" placeholder="Kode (G01)"><input id="tn" placeholder="Nama (opsional)"><button class="pri" onclick="add('t')">Tambah</button></div>
+ ${S.teachers.map((t,i)=>`<div style="border-top:1px solid var(--bd);padding:8px 0"><div class="row" style="margin-bottom:6px"><b style="flex:1">${esc(t.k)}</b><span class="mu">${esc(t.n)}</span><button onclick="del('teachers',${i})">Hapus</button></div><div class="dgrid">${DAYS.slice(0,S.days).map((d,k)=>{const on=(t.avoid||[]).includes(k);return`<button class="${on?"pri":""}" style="font-size:11px;padding:5px 4px" onclick="toggleAvoid(${i},${k})">${d.slice(0,3)}${on?" 🚫":""}</button>`}).join("")}</div></div>`).join("")||'<span class="mu">Belum ada guru</span>'}
+ <p class="mu" style="margin:8px 0 0">Tandai hari yang diusahakan libur/kosong untuk guru tsb (🚫). Bersifat usaha terbaik saat menyusun jadwal otomatis — kalau tidak memungkinkan, guru tetap bisa dijadwalkan di hari itu.</p></div>
+ <div class="card"><h2>Mata Pelajaran</h2><div class="row"><input id="sk" placeholder="Kode (MTK)"><input id="sn" placeholder="Nama (opsional)"><button class="pri" onclick="add('s')">Tambah</button></div>${chips(S.subjects,x=>`<b>${esc(x.k)}</b> ${esc(x.n)}`,"del.bind(null,'subjects')")}</div>
+ <div class="card"><h2>Kelas & Shift per Hari</h2><div class="row"><input id="cn" placeholder="Nama kelas (X-1)"><select id="cs" title="Shift awal semua hari"><option value="1">Awal: Shift 1</option><option value="2">Awal: Shift 2</option></select><button class="pri" onclick="add('c')">Tambah</button></div>
+ ${S.classes.map((c,i)=>`<div style="border-top:1px solid var(--bd);padding:8px 0"><div class="row" style="margin-bottom:6px"><b style="flex:1">${esc(c.n)}</b><select onchange="setAll(${i},this.value)"><option value="">Set semua…</option><option value="1">Semua Shift 1</option><option value="2">Semua Shift 2</option></select><button onclick="del('classes',${i})">Hapus</button></div><div class="dgrid">${DAYS.slice(0,S.days).map((d,k)=>`<label>${d}<select onchange="setSh(${i},${k},this.value)"><option value="1" ${c.sh[k]==1?"selected":""}>Shift 1</option><option value="2" ${c.sh[k]==2?"selected":""}>Shift 2</option></select></label>`).join("")}</div></div>`).join("")||'<span class="mu">Belum ada kelas</span>'}</div>
+ <div class="card noprint"><h2>Excel</h2><div class="row"><button onclick="dlTemplate()">⬇ Unduh templat</button><label class="pri" style="padding:7px 9px;border-radius:8px;cursor:pointer;border:1px solid var(--ac)">⬆ Import Excel<input type="file" accept=".xlsx,.xls" hidden onchange="impXlsx(this)"></label><button onclick="dlData()">⬇ Ekspor data</button></div><p class="mu" style="margin:0">Templat berisi 4 sheet: Guru, Mapel, Kelas (shift 1/2 per hari, Senin–Sabtu), Penugasan (kelas, mapel, guru, JP). Import menggantikan data pada sheet yang ada.</p></div>
+ <div class="row noprint"><button onclick="sample()">Isi contoh data</button><button onclick="if(confirm('Hapus semua data?')){S=JSON.parse(JSON.stringify(DEF));save();render()}">Reset</button></div>`}
+ if(tab=="shift"){h=`<div class="card"><h2>Hari efektif</h2><select onchange="S.days=+this.value;S.res=null;save();render()">${[5,6].map(n=>`<option value="${n}" ${S.days==n?"selected":""}>${n} hari (${DAYS[0]}–${DAYS[n-1]})</option>`).join("")}</select></div><div class="grid2">`+[1,2].map(s=>{const d=Math.min(shDay[s],S.days-1),c=S.cfg[s][d];
+  const f=(l,k,t="number",ph="")=>`<label>${l}<input type="${t}" ${t=="number"?'min="0"':""} placeholder="${ph}" value="${c[k]}" onchange="cfgSet(${s},${d},'${k}',this.value)"></label>`;
+  const opts=[1,2].flatMap(ss=>DAYS.slice(0,S.days).map((n,i)=>(ss==s&&i==d)?"":`<option value="${ss}-${i}">Shift ${ss} · ${n}</option>`)).join("");
+  return`<div class="card sc"><h2>Alokasi Shift ${s}</h2><div class="chips" style="margin-bottom:8px">${DAYS.slice(0,S.days).map((n,i)=>`<button class="${i==d?"pri":""}" onclick="shDay[${s}]=${i};render()">${n.slice(0,3)}</button>`).join("")}</div>
+  <b>${DAYS[d]}</b>${f("Jam mulai","start","time")}${f("Durasi 1 JP (menit)","dur")}${f("JP per hari","jp")}${f("Istirahat 1 setelah JP ke-","b1a","number","kosong")}${f("Durasi istirahat 1 (menit)","b1d")}${f("Istirahat 2 setelah JP ke-","b2a","number","kosong")}${f("Durasi istirahat 2 (menit)","b2d")}
+  <div class="row" style="margin-top:8px"><select id="cp${s}" style="flex:1"><option value="">Salin dari…</option>${opts}</select><button onclick="copyCfg(${s},${d})">Salin</button></div><div class="row"><button onclick="allDays(${s},${d})">Terapkan ke semua hari</button></div>
+  <p class="mu">${slots(s,d).map(x=>`JP${x.i+1} ${tm(x.s)}–${tm(x.e)}${x.br?` ☕${x.br}′`:""}`).join(" · ")}</p></div>`}).join("")+`</div><p class="mu">Alokasi tiap shift diatur per hari. Kosongkan "Istirahat 2" jika hanya ada satu kali istirahat. Shift tiap kelas diatur per hari di tab Data: pada hari yang dipilih Shift 1 kelas mengikuti alokasi Shift 1 hari itu, dan Shift 2 mengikuti alokasi Shift 2.</p>`}
+ if(tab=="asg"){const cap={};S.classes.forEach(c=>cap[c.n]=c.sh.slice(0,S.days).reduce((a,x,d)=>a+S.cfg[x][d].jp,0));
+  const ctot={};S.classes.forEach(c=>ctot[c.n]=0);
+  const rowsHtml=S.rows.map(r=>{const sub=S.subjects.find(x=>x.k==r.s),tea=S.teachers.find(x=>x.k==r.t);let rt=0;
+   const cells=S.classes.map(c=>{const a=S.asg.find(x=>x.s==r.s&&x.t==r.t&&x.c==c.n);const v=a?a.jp:0;rt+=v;ctot[c.n]+=v;
+    return`<td><input type="number" min="0" max="40" value="${v||""}" placeholder="0" style="width:56px;padding:5px" onchange="setCell('${r.s}','${r.t}','${c.n}',this.value);render()"></td>`}).join("");
+   return`<tr><td class="l">${esc(r.s)}</td><td class="l">${esc(sub?sub.n:"")}</td><td class="l">${esc(r.t)}</td><td class="l">${esc(tea?tea.n:"")}</td>${cells}<td><b>${rt}</b></td><td><button onclick="delRow('${r.s}','${r.t}')">×</button></td></tr>`}).join("");
+  h=`<div class="card"><h2>Tambah baris (mapel × guru)</h2><div class="row"><select id="rs">${opt(S.subjects,x=>x.k)}</select><select id="rt">${opt(S.teachers,x=>x.k)}</select><button class="pri" onclick="addRow()">Tambah baris</button></div><p class="mu">Satu baris = satu pasangan mapel & guru. Isi kolom kelas dengan jumlah JP/minggu untuk kelas itu; kosongkan / isi 0 jika guru tidak mengajar di kelas tsb.</p></div>
+  <div class="card tw"><table><tr><th>Kode Mapel</th><th>Mapel</th><th>Kode Guru</th><th>Guru</th>${S.classes.map(c=>`<th>${esc(c.n)}</th>`).join("")}<th>Total</th><th></th></tr>
+  ${rowsHtml||`<tr><td colspan="${5+S.classes.length}" class="mu">Belum ada baris. Tambahkan mapel × guru di atas.</td></tr>`}
+  ${S.rows.length?`<tr><td colspan="4" class="l"><b>Total JP kelas</b></td>${S.classes.map(c=>`<td><b class="${ctot[c.n]>cap[c.n]?"err":""}">${ctot[c.n]}</b><br><span class="mu" style="font-size:11px">/${cap[c.n]}</span></td>`).join("")}<td></td><td></td></tr>`:""}
+  </table></div>
+  <label class="row" style="align-items:center"><input type="checkbox" id="mg" ${S.minGap?"checked":""} onchange="S.minGap=this.checked;save()"> Minimalkan jeda (gap) jam kosong guru dalam sehari</label>
+  <p class="mu" style="margin:0 0 8px">Kalau aktif, penyusun akan mengusahakan jam mengajar tiap guru dalam satu hari berdekatan (tidak lompat jauh, mis. 2 jam pertama lalu 2 jam terakhir).</p>
+  <button class="pri" onclick="gen()">⚙️ Susun Jadwal</button>`}
+ if(tab=="jadwal"){if(!S.res)h=`<div class="card">Belum ada jadwal. <button class="pri" onclick="gen()">⚙️ Susun Jadwal</button></div>`;
+  else{selC=selC||S.classes[0].n;selT=selT||(S.teachers[0]||{}).k;CONF=computeConflicts();
+   h=`<div class="row noprint"><button class="pri" onclick="gen()">🔄 Susun ulang</button><span class="mu noprint" style="align-self:center">Kode sel = Kode Guru+Kode Mapel (contoh: A10)</span><button onclick="csv()">⬇ CSV</button><button onclick="dlJadwal()">⬇ Excel</button><button onclick="window.print()">🖨 Cetak</button></div>
+   ${S.res.un.length?`<div class="card err"><b>⚠ ${S.res.un.length} blok belum terjadwal</b> (slot/guru bentrok atau JP melebihi kapasitas):<br>${S.res.un.map(esc).join("<br>")}</div>`:''}
+   ${S.res.vio?`<div class="card"><b>ℹ️ ${S.res.vio} JP terpaksa dijadwalkan di hari yang diusahakan libur</b> untuk guru tertentu (tidak ada slot lain yang tersedia). Cek preferensi guru di tab Data atau susun ulang.</div>`:''}
+   ${S.minGap&&S.res.gap?`<p class="mu noprint">Total jeda kosong guru dalam sehari (setelah diminimalkan): ${Math.round(S.res.gap)} menit.</p>`:''}
+   ${CONF.list.length?`<div class="card err"><b>⚠ ${CONF.list.length} bentrok guru terdeteksi</b> (kemungkinan akibat pemindahan manual):<br>${CONF.list.map(x=>{const tn=(S.teachers.find(v=>v.k==x.t)||{}).n||"";return`${esc(x.t)} ${esc(tn)} — ${DAYS[x.d]}: ${esc(x.c1)} vs ${esc(x.c2)}`}).join("<br>")}</div>`:(S.res.un.length?"":'<div class="card">✅ Semua JP terjadwal tanpa bentrok guru.</div>')}
+   <div class="row noprint"><button class="${!viewAll?"pri":""}" onclick="viewAll=false;render()">📋 Per Kelas</button><button class="${viewAll?"pri":""}" onclick="viewAll=true;moveFrom=null;editCell=null;render()">🗂 Semua Kelas & Hari</button></div>
+   ${viewAll?allTable():`<div class="card"><div class="row"><h2 style="margin:0">Per Kelas</h2><select onchange="selC=this.value;moveFrom=null;editCell=null;render()">${opt(S.classes,x=>x.n,selC)}</select></div>${cView()}</div>`}
+   <div class="card"><div class="row"><h2 style="margin:0">Per Guru</h2><select onchange="selT=this.value;render()">${opt(S.teachers,x=>x.k,selT)}</select></div>${tView()}</div>`}}
+ $("#app").innerHTML=h}
+render();
+sbPull();
+</script></body></html>

@@ -180,14 +180,16 @@ async function saveFile(name,data){
   const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),2000)}catch(e){alert("Gagal mengunduh file: "+(e.message||e))}}
 function wbBlob(wb){const a=XLSX.write(wb,{bookType:"xlsx",type:"array"});return new Blob([a],{type:"application/octet-stream"})}
+function asgWide(cls,rows,asg,tn,sn){const out=[["No","Kode Guru","Nama Guru","Kode Mapel","Nama Mapel",...cls,"Total"]];
+ rows.forEach((r,i)=>{let tot=0;const cells=cls.map(c=>{const a=asg.find(x=>x.s==r.s&&x.t==r.t&&x.c==c);const v=a?a.jp:"";tot+=v||0;return v});out.push([i+1,r.t,tn(r.t),r.s,sn(r.s),...cells,tot])});return out}
 function mkWb(g,m,k,p){const wb=XLSX.utils.book_new();
  const add=(n,rows,w)=>{const ws=XLSX.utils.aoa_to_sheet(rows);ws["!cols"]=w.map(x=>({wch:x}));XLSX.utils.book_append_sheet(wb,ws,n)};
  add("Guru",[["Kode","Nama","Hari Dihindari (cth: Sabtu, Jumat)"],...g],[10,26,30]);add("Mapel",[["Kode","Nama"],...m],[10,26]);
- add("Kelas",[["Kelas",...DAYS],...k],[12,9,9,9,9,9,9]);add("Penugasan",[["Kelas","Mapel","Guru","JP per minggu"],...p],[12,10,10,14]);return wb}
+ add("Kelas",[["Kelas",...DAYS],...k],[12,9,9,9,9,9,9]);add("Penugasan",p,[5,11,22,11,22,...p[0].slice(5).map(()=>8)]);return wb}
 function dlTemplate(){if(typeof XLSX=="undefined")return alert("Library Excel belum termuat, periksa koneksi.");
- saveFile("template-jadwal.xlsx",wbBlob(mkWb([["G01","Budi",""],["G02","Siti","Sabtu"]],[["MTK","Matematika"],["BIN","B. Indonesia"]],[["X-1",1,1,1,1,1,1],["X-2",1,1,1,2,2,2]],[["X-1","MTK","G01",4],["X-1","BIN","G02",4],["X-2","MTK","G01",4],["X-2","BIN","G02",4]])))}
+ saveFile("template-jadwal.xlsx",wbBlob(mkWb([["G01","Budi",""],["G02","Siti","Sabtu"]],[["MTK","Matematika"],["BIN","B. Indonesia"]],[["X-1",1,1,1,1,1,1],["X-2",1,1,1,2,2,2]],asgWide(["X-1","X-2"],[{s:"MTK",t:"G01"},{s:"BIN",t:"G02"}],[{c:"X-1",s:"MTK",t:"G01",jp:4},{c:"X-1",s:"BIN",t:"G02",jp:4},{c:"X-2",s:"MTK",t:"G01",jp:4},{c:"X-2",s:"BIN",t:"G02",jp:4}],t=>({G01:"Budi",G02:"Siti"})[t]||"",s=>({MTK:"Matematika",BIN:"B. Indonesia"})[s]||""))))}
 function dlData(){if(typeof XLSX=="undefined")return alert("Library Excel belum termuat.");
- saveFile("data-jadwal.xlsx",wbBlob(mkWb(S.teachers.map(x=>[x.k,x.n,(x.avoid||[]).map(d=>DAYS[d]).join(", ")]),S.subjects.map(x=>[x.k,x.n]),S.classes.map(x=>[x.n,...x.sh]),S.asg.map(x=>[x.c,x.s,x.t,x.jp]))))}
+ saveFile("data-jadwal.xlsx",wbBlob(mkWb(S.teachers.map(x=>[x.k,x.n,(x.avoid||[]).map(d=>DAYS[d]).join(", ")]),S.subjects.map(x=>[x.k,x.n]),S.classes.map(x=>[x.n,...x.sh]),asgWide(S.classes.map(c=>c.n),S.rows,S.asg,t=>(S.teachers.find(x=>x.k==t)||{}).n||"",s=>(S.subjects.find(x=>x.k==s)||{}).n||""))))}
 function dlJadwal(){if(typeof XLSX=="undefined"||!S.res)return;const wb=XLSX.utils.book_new();
  S.classes.forEach(c=>{const g=S.res.cg[c.n],sls=g.map((_,d)=>slots(c.sh[d],d)),mx=Math.max(...sls.map(s=>s.length));const rows=[["JP",...DAYS.slice(0,S.days).map((d,i)=>d+" (Shift "+c.sh[i]+")")]];
   for(let i=0;i<mx;i++)rows.push([i+1,...g.map((d,k)=>{const s=sls[k][i];return s?tm(s.s)+"-"+tm(s.e)+(d[i]?"  "+d[i].s+" ("+d[i].t+")":""):""})]);
@@ -198,17 +200,29 @@ function impXlsx(inp){const f=inp.files[0];if(!f)return;if(typeof XLSX=="undefin
  const r=new FileReader();r.onload=e=>{try{
   const wb=XLSX.read(e.target.result,{type:"array"});
   const get=n=>{const k=wb.SheetNames.find(x=>x.toLowerCase()==n);return k?XLSX.utils.sheet_to_json(wb.Sheets[k],{header:1,defval:""}).slice(1).filter(r=>String(r[0]).trim()):null};
-  const T=get("guru"),M=get("mapel"),K=get("kelas"),P=get("penugasan");
-  if(!T&&!M&&!K&&!P)return alert("Sheet tidak dikenali. Gunakan templat: Guru, Mapel, Kelas, Penugasan.");
+  const T=get("guru"),M=get("mapel"),K=get("kelas");let P=null,PW=null;
+  const pk=wb.SheetNames.find(x=>x.toLowerCase()=="penugasan");
+  if(pk){const raw=XLSX.utils.sheet_to_json(wb.Sheets[pk],{header:1,defval:""});const hd=raw[0]||[];
+   if(String(hd[1]).toLowerCase().includes("kode guru"))PW={hd,rows:raw.slice(1)};else P=raw.slice(1).filter(r=>String(r[0]).trim())}
+  if(!T&&!M&&!K&&!P&&!PW)return alert("Sheet tidak dikenali. Gunakan templat: Guru, Mapel, Kelas, Penugasan (No, Kode Guru, Nama Guru, Kode Mapel, Nama Mapel, lalu kolom per kelas).");
   const u=v=>String(v).trim().toUpperCase();
   if(T)S.teachers=T.map(r=>({k:u(r[0]),n:String(r[1]).trim(),avoid:parseAvoidStr(r[2])}));
   if(M)S.subjects=M.map(r=>({k:u(r[0]),n:String(r[1]).trim()}));
   if(K)S.classes=K.map(r=>{const one=r[2]===undefined||r[2]==="";return{n:String(r[0]).trim(),sh:DAYS.map((_,i)=>+r[one?1:i+1]==2?2:1)}});
-  if(P)S.asg=P.map(r=>({c:String(r[0]).trim(),s:u(r[1]),t:u(r[2]),jp:Math.max(0,Math.round(+r[3]||0))})).filter(a=>a.jp>0);
+  let PWrows=null,PWtn={},PWsn={};
+  if(PW){const cols=[];PW.hd.forEach((h,i)=>{const n=String(h).trim();if(i>=5&&n&&n.toLowerCase()!="total")cols.push([i,n])});
+   const asg=[];PWrows=[];
+   PW.rows.forEach(r=>{const t=u(r[1]),sb=u(r[3]);if(!t||!sb||t=="TOTAL")return;
+    PWtn[t]=String(r[2]).trim();PWsn[sb]=String(r[4]).trim();
+    if(!PWrows.some(x=>x.s==sb&&x.t==t))PWrows.push({s:sb,t});
+    cols.forEach(([i,n])=>{const jp=Math.max(0,Math.round(+r[i]||0));if(jp>0)asg.push({c:n,s:sb,t,jp})})});
+   S.asg=asg;cols.forEach(([i,n])=>{if(!S.classes.some(c=>c.n==n))S.classes.push({n,sh:Array(6).fill(1)})})}
+  else if(P)S.asg=P.map(r=>({c:String(r[0]).trim(),s:u(r[1]),t:u(r[2]),jp:Math.max(0,Math.round(+r[3]||0))})).filter(a=>a.jp>0);
   let add=0;S.asg.forEach(a=>{if(!S.classes.some(c=>c.n==a.c)){S.classes.push({n:a.c,sh:Array(6).fill(1)});add++}
    if(!S.subjects.some(x=>x.k==a.s)){S.subjects.push({k:a.s,n:""});add++}
    if(!S.teachers.some(x=>x.k==a.t)){S.teachers.push({k:a.t,n:"",avoid:[]});add++}});
-  S.rows=rowsFromAsg();S.res=null;save();tab="asg";render();
+  if(PW){Object.keys(PWtn).forEach(k=>{const x=S.teachers.find(v=>v.k==k);if(x&&!x.n)x.n=PWtn[k]});Object.keys(PWsn).forEach(k=>{const x=S.subjects.find(v=>v.k==k);if(x&&!x.n)x.n=PWsn[k]})}
+  S.rows=PWrows||rowsFromAsg();S.res=null;save();tab="asg";render();
   alert("Import berhasil: "+S.teachers.length+" guru, "+S.subjects.length+" mapel, "+S.classes.length+" kelas, "+S.asg.length+" penugasan."+(add?"\n"+add+" data yang belum terdaftar ditambahkan otomatis (kelas baru = Shift 1).":""))
  }catch(err){alert("Gagal membaca file: "+err.message)}inp.value=""};r.readAsArrayBuffer(f)}
 const chips=(arr,f,del)=>`<div class="chips">${arr.map((x,i)=>`<span class="chip">${f(x)}<b onclick="${del}(${i})">×</b></span>`).join("")||'<span class="mu">Belum ada data</span>'}</div>`;
@@ -257,14 +271,14 @@ function render(){
   <p class="mu">${slots(s,d).map(x=>`JP${x.i+1} ${tm(x.s)}–${tm(x.e)}${x.br?` ☕${x.br}′`:""}`).join(" · ")}</p></div>`}).join("")+`</div><p class="mu">Alokasi tiap shift diatur per hari. Kosongkan "Istirahat 2" jika hanya ada satu kali istirahat. Shift tiap kelas diatur per hari di tab Data: pada hari yang dipilih Shift 1 kelas mengikuti alokasi Shift 1 hari itu, dan Shift 2 mengikuti alokasi Shift 2.</p>`}
  if(tab=="asg"){const cap={};S.classes.forEach(c=>cap[c.n]=c.sh.slice(0,S.days).reduce((a,x,d)=>a+S.cfg[x][d].jp,0));
   const ctot={};S.classes.forEach(c=>ctot[c.n]=0);
-  const rowsHtml=S.rows.map(r=>{const sub=S.subjects.find(x=>x.k==r.s),tea=S.teachers.find(x=>x.k==r.t);let rt=0;
+  const rowsHtml=S.rows.map((r,ri)=>{const sub=S.subjects.find(x=>x.k==r.s),tea=S.teachers.find(x=>x.k==r.t);let rt=0;
    const cells=S.classes.map(c=>{const a=S.asg.find(x=>x.s==r.s&&x.t==r.t&&x.c==c.n);const v=a?a.jp:0;rt+=v;ctot[c.n]+=v;
     return`<td><input type="number" min="0" max="40" value="${v||""}" placeholder="0" style="width:56px;padding:5px" onchange="setCell('${r.s}','${r.t}','${c.n}',this.value);render()"></td>`}).join("");
-   return`<tr><td class="l">${esc(r.s)}</td><td class="l">${esc(sub?sub.n:"")}</td><td class="l">${esc(r.t)}</td><td class="l">${esc(tea?tea.n:"")}</td>${cells}<td><b>${rt}</b></td><td><button onclick="delRow('${r.s}','${r.t}')">×</button></td></tr>`}).join("");
+   return`<tr><td>${ri+1}</td><td class="l">${esc(r.t)}</td><td class="l">${esc(tea?tea.n:"")}</td><td class="l">${esc(r.s)}</td><td class="l">${esc(sub?sub.n:"")}</td>${cells}<td><b>${rt}</b></td><td><button onclick="delRow('${r.s}','${r.t}')">×</button></td></tr>`}).join("");
   h=`<div class="card"><h2>Tambah baris (mapel × guru)</h2><div class="row"><select id="rs">${opt(S.subjects,x=>x.k)}</select><select id="rt">${opt(S.teachers,x=>x.k)}</select><button class="pri" onclick="addRow()">Tambah baris</button></div><p class="mu">Satu baris = satu pasangan mapel & guru. Isi kolom kelas dengan jumlah JP/minggu untuk kelas itu; kosongkan / isi 0 jika guru tidak mengajar di kelas tsb.</p></div>
-  <div class="card tw"><table><tr><th>Kode Mapel</th><th>Mapel</th><th>Kode Guru</th><th>Guru</th>${S.classes.map(c=>`<th>${esc(c.n)}</th>`).join("")}<th>Total</th><th></th></tr>
-  ${rowsHtml||`<tr><td colspan="${5+S.classes.length}" class="mu">Belum ada baris. Tambahkan mapel × guru di atas.</td></tr>`}
-  ${S.rows.length?`<tr><td colspan="4" class="l"><b>Total JP kelas</b></td>${S.classes.map(c=>`<td><b class="${ctot[c.n]>cap[c.n]?"err":""}">${ctot[c.n]}</b><br><span class="mu" style="font-size:11px">/${cap[c.n]}</span></td>`).join("")}<td></td><td></td></tr>`:""}
+  <div class="card tw"><table><tr><th>No</th><th>Kode Guru</th><th>Nama Guru</th><th>Kode Mapel</th><th>Nama Mapel</th>${S.classes.map(c=>`<th>${esc(c.n)}</th>`).join("")}<th>Total</th><th></th></tr>
+  ${rowsHtml||`<tr><td colspan="${7+S.classes.length}" class="mu">Belum ada baris. Tambahkan mapel × guru di atas.</td></tr>`}
+  ${S.rows.length?`<tr><td colspan="5" class="l"><b>Total JP kelas</b></td>${S.classes.map(c=>`<td><b class="${ctot[c.n]>cap[c.n]?"err":""}">${ctot[c.n]}</b><br><span class="mu" style="font-size:11px">/${cap[c.n]}</span></td>`).join("")}<td></td><td></td></tr>`:""}
   </table></div>
   <label class="row" style="align-items:center"><input type="checkbox" id="mg" ${S.minGap?"checked":""} onchange="S.minGap=this.checked;save()"> Minimalkan jeda (gap) jam kosong guru dalam sehari</label>
   <p class="mu" style="margin:0 0 8px">Kalau aktif, penyusun akan mengusahakan jam mengajar tiap guru dalam satu hari berdekatan (tidak lompat jauh, mis. 2 jam pertama lalu 2 jam terakhir).</p>

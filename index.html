@@ -184,8 +184,8 @@ function asgWide(cls,rows,asg,tn,sn){const out=[["No","Kode Guru","Nama Guru","K
  rows.forEach((r,i)=>{let tot=0;const cells=cls.map(c=>{const a=asg.find(x=>x.s==r.s&&x.t==r.t&&x.c==c);const v=a?a.jp:"";tot+=v||0;return v});out.push([i+1,r.t,tn(r.t),r.s,sn(r.s),...cells,tot])});return out}
 function mkWb(g,m,k,p){const wb=XLSX.utils.book_new();
  const add=(n,rows,w)=>{const ws=XLSX.utils.aoa_to_sheet(rows);ws["!cols"]=w.map(x=>({wch:x}));XLSX.utils.book_append_sheet(wb,ws,n)};
- add("Guru",[["Kode","Nama","Hari Dihindari (cth: Sabtu, Jumat)"],...g],[10,26,30]);add("Mapel",[["Kode","Nama"],...m],[10,26]);
- add("Kelas",[["Kelas",...DAYS],...k],[12,9,9,9,9,9,9]);add("Penugasan",p,[5,11,22,11,22,...p[0].slice(5).map(()=>8)]);return wb}
+ add("Penugasan",p,[5,11,22,11,22,...p[0].slice(5).map(()=>8)]);
+ add("Kelas",[["Kelas",...DAYS],...k],[12,9,9,9,9,9,9]);add("Guru",[["Kode","Nama","Hari Dihindari (cth: Sabtu, Jumat)"],...g],[10,26,30]);add("Mapel",[["Kode","Nama"],...m],[10,26]);return wb}
 function dlTemplate(){if(typeof XLSX=="undefined")return alert("Library Excel belum termuat, periksa koneksi.");
  saveFile("template-jadwal.xlsx",wbBlob(mkWb([["G01","Budi",""],["G02","Siti","Sabtu"]],[["MTK","Matematika"],["BIN","B. Indonesia"]],[["X-1",1,1,1,1,1,1],["X-2",1,1,1,2,2,2]],asgWide(["X-1","X-2"],[{s:"MTK",t:"G01"},{s:"BIN",t:"G02"}],[{c:"X-1",s:"MTK",t:"G01",jp:4},{c:"X-1",s:"BIN",t:"G02",jp:4},{c:"X-2",s:"MTK",t:"G01",jp:4},{c:"X-2",s:"BIN",t:"G02",jp:4}],t=>({G01:"Budi",G02:"Siti"})[t]||"",s=>({MTK:"Matematika",BIN:"B. Indonesia"})[s]||""))))}
 function dlData(){if(typeof XLSX=="undefined")return alert("Library Excel belum termuat.");
@@ -202,18 +202,21 @@ function impXlsx(inp){const f=inp.files[0];if(!f)return;if(typeof XLSX=="undefin
   const get=n=>{const k=wb.SheetNames.find(x=>x.toLowerCase()==n);return k?XLSX.utils.sheet_to_json(wb.Sheets[k],{header:1,defval:""}).slice(1).filter(r=>String(r[0]).trim()):null};
   const T=get("guru"),M=get("mapel"),K=get("kelas");let P=null,PW=null;
   const pk=wb.SheetNames.find(x=>x.toLowerCase()=="penugasan");
-  if(pk){const raw=XLSX.utils.sheet_to_json(wb.Sheets[pk],{header:1,defval:""});const hd=raw[0]||[];
-   if(String(hd[1]).toLowerCase().includes("kode guru"))PW={hd,rows:raw.slice(1)};else P=raw.slice(1).filter(r=>String(r[0]).trim())}
+  if(pk){const raw=XLSX.utils.sheet_to_json(wb.Sheets[pk],{header:1,defval:""});
+   const hi=raw.findIndex(r=>r.some(x=>String(x).trim().toLowerCase()=="kode guru"));
+   if(hi>=0){const hd=raw[hi],f=n=>hd.findIndex(x=>String(x).trim().toLowerCase()==n);
+    PW={hd,rows:raw.slice(hi+1),tg:f("kode guru"),ng:f("nama guru"),sm:f("kode mapel"),nm:f("nama mapel")}}
+   else P=raw.slice(1).filter(r=>String(r[0]).trim())}
   if(!T&&!M&&!K&&!P&&!PW)return alert("Sheet tidak dikenali. Gunakan templat: Guru, Mapel, Kelas, Penugasan (No, Kode Guru, Nama Guru, Kode Mapel, Nama Mapel, lalu kolom per kelas).");
   const u=v=>String(v).trim().toUpperCase();
   if(T)S.teachers=T.map(r=>({k:u(r[0]),n:String(r[1]).trim(),avoid:parseAvoidStr(r[2])}));
   if(M)S.subjects=M.map(r=>({k:u(r[0]),n:String(r[1]).trim()}));
   if(K)S.classes=K.map(r=>{const one=r[2]===undefined||r[2]==="";return{n:String(r[0]).trim(),sh:DAYS.map((_,i)=>+r[one?1:i+1]==2?2:1)}});
   let PWrows=null,PWtn={},PWsn={};
-  if(PW){const cols=[];PW.hd.forEach((h,i)=>{const n=String(h).trim();if(i>=5&&n&&n.toLowerCase()!="total")cols.push([i,n])});
+  if(PW){const cols=[],fx=[0,PW.tg,PW.ng,PW.sm,PW.nm];PW.hd.forEach((h,i)=>{const n=String(h).trim(),l=n.toLowerCase();if(n&&!fx.includes(i)&&l!="no"&&l!="total"&&l!="jumlah")cols.push([i,n])});
    const asg=[];PWrows=[];
-   PW.rows.forEach(r=>{const t=u(r[1]),sb=u(r[3]);if(!t||!sb||t=="TOTAL")return;
-    PWtn[t]=String(r[2]).trim();PWsn[sb]=String(r[4]).trim();
+   PW.rows.forEach(r=>{const t=u(r[PW.tg]),sb=u(r[PW.sm]);if(!t||!sb||t.startsWith("TOTAL")||t.startsWith("JUMLAH"))return;
+    PWtn[t]=PW.ng>=0?String(r[PW.ng]).trim():"";PWsn[sb]=PW.nm>=0?String(r[PW.nm]).trim():"";
     if(!PWrows.some(x=>x.s==sb&&x.t==t))PWrows.push({s:sb,t});
     cols.forEach(([i,n])=>{const jp=Math.max(0,Math.round(+r[i]||0));if(jp>0)asg.push({c:n,s:sb,t,jp})})});
    S.asg=asg;cols.forEach(([i,n])=>{if(!S.classes.some(c=>c.n==n))S.classes.push({n,sh:Array(6).fill(1)})})}
